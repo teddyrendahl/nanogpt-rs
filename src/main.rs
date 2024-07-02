@@ -5,9 +5,11 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{AdamW, Optimizer, VarBuilder, VarMap};
 use data::{Dataset, Tokenizer};
 use itertools::Itertools;
-use models::BigramLanguageModel;
+use models::{estimate_loss, BigramLanguageModel};
 
 const DATA_PATH: &str = "data/tinyshakespeare.txt";
+const BATCH_SIZE: usize = 32;
+const BLOCK_SIZE: usize = 8;
 
 fn main() -> anyhow::Result<()> {
     let device = Device::Cpu;
@@ -18,20 +20,26 @@ fn main() -> anyhow::Result<()> {
         Tensor::from_iter(source.chars().map(|c| tokenizer.encode(&c)), &device)?,
         device.clone(),
     )?;
-    let (train, _test) = dataset.train_test_split(0.9)?;
+    let (train, val) = dataset.train_test_split(0.9)?;
     let varmap = VarMap::new();
     let vs = VarBuilder::from_varmap(&varmap, DType::F64, &device);
     let model = BigramLanguageModel::new(tokenizer.vocab_size(), vs)?;
 
-    let mut optimizer = AdamW::new_lr(varmap.all_vars(), 1e-3)?;
+    let mut optimizer = AdamW::new_lr(varmap.all_vars(), 1e-2)?;
     let mut rng = rand::thread_rng();
 
-    for epoch in 0..5000 {
-        let (xb, yb) = train.batch(&mut rng, 32, 8)?;
+    for epoch in 0..3000 {
+        let (xb, yb) = train.batch(&mut rng, BATCH_SIZE, BLOCK_SIZE)?;
         let loss = model.train(&xb, &yb)?;
         optimizer.backward_step(&loss)?;
-        if epoch % 100 == 0 {
-            println!("Epoch: {}, Loss: {}", epoch, loss.to_scalar::<f64>()?)
+
+        if epoch % 300 == 0 {
+            println!(
+                "Epoch: {}, Training Loss: {:.4}, Validation Loss: {:.4}",
+                epoch,
+                estimate_loss(&model, &train, &mut rng, BATCH_SIZE, BLOCK_SIZE, 200)?,
+                estimate_loss(&model, &val, &mut rng, BATCH_SIZE, BLOCK_SIZE, 200)?
+            )
         }
     }
 

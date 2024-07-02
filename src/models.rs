@@ -3,6 +3,8 @@ use candle_nn::{embedding, loss::cross_entropy, ops::softmax, Embedding, Module,
 use rand::Rng;
 use rand_distr::{Distribution, WeightedIndex};
 
+use crate::data::Dataset;
+
 pub(crate) struct BigramLanguageModel {
     /// The simplest version of Bigram model
     ///
@@ -57,4 +59,20 @@ impl candle_core::Module for BigramLanguageModel {
     fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
         self.embedding_table.forward(xs)
     }
+}
+
+pub(crate) fn estimate_loss(
+    model: &BigramLanguageModel,
+    data: &Dataset,
+    rng: &mut impl Rng,
+    batch_size: usize,
+    block_size: usize,
+    eval_iters: usize,
+) -> candle_core::Result<f64> {
+    let mut v = 0.0;
+    for _ in 0..eval_iters {
+        let (x, y) = data.batch(rng, batch_size, block_size)?;
+        v += model.train(&x, &y)?.to_scalar::<f64>()?;
+    }
+    Ok(v / (eval_iters as f64))
 }

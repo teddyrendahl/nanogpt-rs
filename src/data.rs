@@ -10,12 +10,17 @@ type Batch = (Tensor, Tensor);
 
 pub(crate) struct Dataset {
     tokens: Tensor,
-    device: Device,
 }
 
 impl Dataset {
-    pub(crate) fn new(tokens: Tensor, device: Device) -> Result<Self, candle_core::Error> {
-        Ok(Self { tokens, device })
+    pub(crate) fn new(
+        raw_data: String,
+        tokenizer: &Tokenizer,
+        device: &Device,
+    ) -> Result<Self, candle_core::Error> {
+        Ok(Self {
+            tokens: Tensor::from_iter(raw_data.chars().map(|c| tokenizer.encode(&c)), device)?,
+        })
     }
 
     pub(crate) fn train_test_split(
@@ -25,11 +30,9 @@ impl Dataset {
         let n = (self.tokens.dims()[0] as f32 * split).round() as usize;
         let train = Dataset {
             tokens: self.tokens.i(..n)?,
-            device: self.device.clone(),
         };
         let test = Dataset {
             tokens: self.tokens.i(n..)?,
-            device: self.device,
         };
         Ok((train, test))
     }

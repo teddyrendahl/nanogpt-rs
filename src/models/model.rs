@@ -1,10 +1,11 @@
-use candle_core::{Device, IndexOp, Tensor};
-use candle_nn::{ops::softmax, VarBuilder};
+use candle_core::{DType, Device, IndexOp, Tensor};
+use candle_nn::{ops::softmax, VarBuilder, VarMap};
 use clap::Subcommand;
+use itertools::Itertools;
 use rand::Rng;
 use rand_distr::{Distribution, WeightedIndex};
 
-use crate::data::Dataset;
+use crate::data::{Dataset, Tokenizer};
 
 use super::{
     attention::{AttentionModelConfiguration, SelfAttentionModel},
@@ -50,11 +51,13 @@ impl<M: Model + ?Sized> Model for Box<M> {
 /// Generate a new value by repeatedly sampling the provided Model
 pub(crate) fn generate<M: Model>(
     model: &M,
-    mut idx: Tensor,
+    tokenizer: &Tokenizer,
     max_new_tokens: usize,
     device: &Device,
     rng: &mut impl Rng,
-) -> candle_core::Result<Tensor> {
+) -> candle_core::Result<String> {
+    // TODO: Allow for seeding with custom chars
+    let mut idx = Tensor::zeros((1, 1), DType::I64, device)?;
     for _ in 0..max_new_tokens {
         let xs = idx.i((.., idx.dims2()?.1.saturating_sub(model.block_size())..))?;
         let logits = model.forward(&xs)?;
@@ -71,10 +74,14 @@ pub(crate) fn generate<M: Model>(
             ],
             1,
         )?;
-        // Append it to idx
     }
-    Ok(idx)
+    // Decode our data into a String
+    Ok(idx.to_vec2::<i64>()?[0]
+        .iter()
+        .map(|i| tokenizer.decode(i))
+        .join(""))
 }
+
 #[derive(Clone, Debug, Subcommand)]
 pub(crate) enum ModelVariants {
     Bigram,
@@ -85,9 +92,10 @@ impl ModelVariants {
     pub(crate) fn to_model(
         &self,
         device: &Device,
-        vs: VarBuilder,
+        vm: &VarMap,
         vocab_size: usize,
     ) -> candle_core::Result<Box<dyn Model>> {
+        let vs = VarBuilder::from_varmap(vm, DType::F64, device);
         Ok(match &self {
             ModelVariants::Bigram => Box::new(BigramLanguageModel::new(vocab_size, vs)?),
             ModelVariants::Attention(c) => {
